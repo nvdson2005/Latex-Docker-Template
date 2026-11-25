@@ -1,0 +1,7 @@
+services:
+  latex:
+    image: texlive/texlive:latest
+    working_dir: /data
+    volumes:
+      - .:/data
+    command: latexmk -pdf -interaction=nonstopmode -outdir=build main.tex
