@@ -1,5 +1,13 @@
 services:
+  app:
+    build: ./editor
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - .:/data
+
   latex:
+    profiles: [legacy]
     image: texlive/texlive:latest
     working_dir: /data
     volumes:
