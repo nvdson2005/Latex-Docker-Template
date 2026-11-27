@@ -96,6 +96,7 @@ export function mountWorkspace(root: HTMLElement, onSaved: () => void): Workspac
   let openRequest = 0;
   let treeRequest = 0;
   let diskGeneration = 0;
+  let moveDestination: string | undefined;
 
   function activeBuffer(): Buffer | undefined {
     return active === undefined ? undefined : buffers.get(active);
@@ -184,6 +185,7 @@ export function mountWorkspace(root: HTMLElement, onSaved: () => void): Workspac
   }
 
   async function open(path: string, line?: number): Promise<void> {
+    if (moveDestination && contains(moveDestination, path)) return;
     const request = ++openRequest;
     showError();
     try {
@@ -319,22 +321,30 @@ export function mountWorkspace(root: HTMLElement, onSaved: () => void): Workspac
     const to = window.prompt('Rename or move to a project-relative path', from);
     if (!to?.trim() || to === from) return;
     await mutate(async () => {
-      await check(await send('/api/files/move', 'POST', { from, to }));
-      diskGeneration++;
+      if ([...buffers.keys()].some((path) => !contains(from, path) && contains(to, path))) {
+        throw new Error('Choose a destination without an open file to preserve its draft.');
+      }
+      moveDestination = to;
       openRequest++;
-      for (const [path, buffer] of [...buffers]) {
-        if (!contains(from, path)) continue;
-        buffers.delete(path);
-        buffers.set(to + path.slice(from.length), buffer);
+      try {
+        await check(await send('/api/files/move', 'POST', { from, to }));
+        diskGeneration++;
+        for (const [path, buffer] of [...buffers]) {
+          if (!contains(from, path)) continue;
+          buffers.delete(path);
+          buffers.set(to + path.slice(from.length), buffer);
+        }
+        for (const path of [...expanded]) {
+          if (!contains(from, path)) continue;
+          expanded.delete(path);
+          expanded.add(to + path.slice(from.length));
+        }
+        if (active && contains(from, active)) active = to + active.slice(from.length);
+        updateHeader();
+        await refreshTree();
+      } finally {
+        moveDestination = undefined;
       }
-      for (const path of [...expanded]) {
-        if (!contains(from, path)) continue;
-        expanded.delete(path);
-        expanded.add(to + path.slice(from.length));
-      }
-      if (active && contains(from, active)) active = to + active.slice(from.length);
-      updateHeader();
-      await refreshTree();
     });
   }
 

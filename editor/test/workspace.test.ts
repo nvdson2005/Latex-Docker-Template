@@ -167,3 +167,20 @@ it('does not refresh over edits made while disk reads are pending', async () => 
   expect(view().state.doc.toString()).toBe('Local edits');
   expect(workspace.hasUnsavedEdits()).toBe(true);
 });
+
+it('protects an unsaved destination draft after its disk entry disappears', async () => {
+  const workspace = mountWorkspace(root, vi.fn());
+  await workspace.refresh();
+  await workspace.open('main.tex');
+  write('Destination draft');
+  files.delete('main.tex');
+  entries = entries.filter(({ path }) => path !== 'main.tex');
+  await workspace.refresh();
+  await workspace.open('sections/intro.tex');
+  vi.spyOn(window, 'prompt').mockReturnValue('main.tex');
+  button('Rename or move sections/intro.tex').click();
+  await vi.waitFor(() => expect(root.textContent).toContain('Choose a destination without an open file'));
+  expect(fetchMock.mock.calls.some(([url]) => url === '/api/files/move')).toBe(false);
+  await workspace.open('main.tex');
+  expect(view().state.doc.toString()).toBe('Destination draft');
+});
