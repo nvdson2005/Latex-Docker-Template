@@ -7,5 +7,5 @@
     "rootDir": ".",
     "outDir": "dist"
   },
-  "include": ["server/**/*.ts"]
+  "include": ["server/**/*.ts", "client/**/*.ts"]
 }
