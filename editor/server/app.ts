@@ -1,6 +1,8 @@
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { resolve } from 'node:path';
+import { registerCompileRoutes } from './compile-routes.js';
+import { createCompiler } from './compiler.js';
 import { registerFileRoutes } from './file-routes.js';
 import { createProjectFiles } from './project-files.js';
 
@@ -22,6 +24,7 @@ export async function createApp(projectRoot: string): Promise<FastifyInstance> {
   });
 
   registerFileRoutes(app, createProjectFiles(projectRoot));
+  registerCompileRoutes(app, await createCompiler(projectRoot));
   await app.register(fastifyStatic, { root: resolve('dist/client') });
   return app;
 }
