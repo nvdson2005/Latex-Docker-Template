@@ -1,6 +1,6 @@
 # LaTeX Template
 
-Docker-based LaTeX project, editable with the VS Code LaTeX Workshop extension.
+Docker-based LaTeX project with a local browser editor, PDF preview, and VS Code LaTeX Workshop support.
 
 ## Layout
 
@@ -10,15 +10,27 @@ Docker-based LaTeX project, editable with the VS Code LaTeX Workshop extension.
 - `build/` – build output (git-ignored)
 - `export/` – dated PDF copies (git-ignored)
 
-## Use
+## Browser editor
 
-1. Copy this folder, rename it, run `git init`.
-2. **VS Code:** install *LaTeX Workshop*; the PDF builds in Docker on save into `build/`
-   (settings in `.vscode/settings.json`).
-3. **CLI:** `./build.sh [export-name]` builds via `docker compose` and copies
-   `build/main.pdf` to `export/<name>-YY-MM-DD.pdf`.
+From the project directory, run:
 
-Requires Docker. To rename the entry file, update `compose.yaml` and `build.sh`.
+```sh
+docker compose up
+```
+
+Open [http://localhost:3000](http://localhost:3000). Docker publishes the editor on the local loopback interface. The first build downloads dependencies. The built image can start offline with `docker compose up --no-build`.
+
+- Open files from the project tree. Use **New file**, **New folder**, **Rename**, and **Delete** to manage entries. Enter project-relative paths when creating or moving files. You can edit `.tex`, `.bib`, `.sty`, and `.cls` sources and manage assets such as images from the tree.
+- Use **Save**, Ctrl+S, or Cmd+S to write the active file. Drafts stay in the browser when you switch files. If a file changed on disk, review the disk copy and choose **Reload disk copy** or **Retry save**.
+- Use **Compile** to build the saved files from `main.tex`. **Auto-compile** is off by default. When enabled, it starts a build about 1.5 seconds after the latest successful save.
+- Open **Compile log** for diagnostics and select a linked error to jump to its source. The preview and **Download PDF** keep using the last successful build after a compile error.
+
+Browser build files live in `build/browser/work/`. The downloadable snapshot is `build/browser/last-good.pdf`.
+
+## VS Code and command line
+
+- In VS Code, install **LaTeX Workshop**. Saving runs the Docker recipe configured in `.vscode/settings.json` and writes `build/main.pdf`.
+- Run `./build.sh [export-name]` to build through the legacy Compose service and copy `build/main.pdf` to `export/<name>-YY-MM-DD.pdf`. The default name is `Document`.
 
 ## Related: shared-reports
 
@@ -37,5 +49,6 @@ This is the single-document starter. Multi-document repo
 Shared conventions: entry point is `main.tex`, keep paths relative to the project folder
 (Docker and LaTeX Workshop mount only that folder), build output goes to git-ignored `build/`.
 
-To use this template for Vietnamese text, switch the engine to XeLaTeX (`-xelatex` in
-`compose.yaml` and the LaTeX Workshop recipe) as shared-reports does.
+For the CLI and VS Code workflows, you can switch to XeLaTeX (`-xelatex` in the
+Compose build command and the LaTeX Workshop recipe) as shared-reports does. The browser
+compiler uses pdfLaTeX.

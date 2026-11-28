@@ -1,3 +1,6 @@
 build/
 export/
 .DS_Store
+
+/editor/node_modules/
+/editor/dist/
