@@ -1,16 +1,24 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { createApp } from '../server/app.js';
 
 describe('workspace request boundary', () => {
   let app: FastifyInstance;
+  let root: string;
 
   beforeAll(async () => {
-    app = await createApp('/data');
+    root = await mkdtemp(join(tmpdir(), 'latex-app-'));
+    app = await createApp(root);
     app.post('/test-write', async () => ({ accepted: true }));
   });
 
-  afterAll(async () => app?.close());
+  afterAll(async () => {
+    await app?.close();
+    if (root) await rm(root, { force: true, recursive: true });
+  });
 
   it.each(['localhost:3000', '127.0.0.1:3000'])('serves workspace HTML at %s', async (host) => {
     const response = await app.inject({ url: '/', headers: { host } });

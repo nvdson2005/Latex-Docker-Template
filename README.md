@@ -52,3 +52,15 @@ Shared conventions: entry point is `main.tex`, keep paths relative to the projec
 For the CLI and VS Code workflows, you can switch to XeLaTeX (`-xelatex` in the
 Compose build command and the LaTeX Workshop recipe) as shared-reports does. The browser
 compiler uses pdfLaTeX.
+
+### LaTeX completion in the browser editor
+
+The editor image includes TexLab. Type a command such as `\sec` or start
+`\begin{ite` to see suggestions. Use Ctrl+Space to request suggestions,
+the arrow keys to select one, and Enter to insert it. Reference completion
+can use labels from other project files, including unsaved browser buffers.
+
+Completion runs locally and works offline after the image is built. If TexLab
+restarts, the browser reconnects and resends its open drafts. You can keep
+editing and saving during the reconnect. Compile and PDF preview use saved
+files.

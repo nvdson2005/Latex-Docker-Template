@@ -1,9 +1,11 @@
 import { basicSetup } from 'codemirror';
 import { StreamLanguage } from '@codemirror/language';
 import { stex } from '@codemirror/legacy-modes/mode/stex';
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import type { TextFile, TreeEntry } from '../shared/contracts.js';
+
+import { createLatexCompletion } from './latex-completion.js';
 
 export interface Workspace {
   open(path: string, line?: number): Promise<void>;
@@ -147,6 +149,7 @@ export function mountWorkspace(root: HTMLElement, onSaved: () => void): Workspac
     actions.append(
       fileAction('Reload disk copy', () => {
         buffer.text = conflict.text;
+        completion.upsert(active!, buffer.text);
         buffer.disk = conflict;
         buffer.version++;
         delete buffer.conflict;
@@ -161,12 +164,18 @@ export function mountWorkspace(root: HTMLElement, onSaved: () => void): Workspac
 
   const editor = new EditorView({ parent: editorHost });
 
+  const completionConfig = new Compartment();
+  const completion = createLatexCompletion(() => {
+    editor.dispatch({ effects: completionConfig.reconfigure(active ? completion.extensionFor(active) : []) });
+  });
+
   function showBuffer(): void {
     const buffer = activeBuffer();
     editor.setState(EditorState.create({
       doc: buffer?.text ?? '',
       extensions: [
         basicSetup,
+        completionConfig.of(active ? completion.extensionFor(active) : []),
         StreamLanguage.define(stex),
         EditorState.lineSeparator.of(buffer?.text.includes('\r\n') ? '\r\n' : '\n'),
         EditorState.readOnly.of(!buffer),
@@ -175,6 +184,7 @@ export function mountWorkspace(root: HTMLElement, onSaved: () => void): Workspac
         EditorView.updateListener.of((update) => {
           if (!buffer || !update.docChanged) return;
           buffer.text = update.state.sliceDoc();
+          if (active) completion.upsert(active, buffer.text);
           buffer.version++;
           updateHeader();
         }),
@@ -195,6 +205,7 @@ export function mountWorkspace(root: HTMLElement, onSaved: () => void): Workspac
         if (request !== openRequest) return;
         buffer = { disk, text: disk.text, version: 0 };
         buffers.set(path, buffer);
+        completion.upsert(path, buffer.text);
       }
       if (active !== path) {
         active = path;
@@ -251,6 +262,7 @@ export function mountWorkspace(root: HTMLElement, onSaved: () => void): Workspac
       buffer.version++;
       delete buffer.conflict;
       if (active === path) renderConflict();
+      completion.diskChanged([{ path, type: 2 }]);
       onSaved();
     });
   }
@@ -264,6 +276,7 @@ export function mountWorkspace(root: HTMLElement, onSaved: () => void): Workspac
       if (response.status === 404) {
         if (buffers.get(path) !== buffer || buffer.version !== version || diskGeneration !== generation || busy) return;
         buffers.delete(path);
+        completion.close(path);
         if (active === path) {
           active = undefined;
           showBuffer();
@@ -275,6 +288,8 @@ export function mountWorkspace(root: HTMLElement, onSaved: () => void): Workspac
       if (disk.revision === buffer.disk.revision) return;
       buffer.disk = disk;
       buffer.text = disk.text;
+      completion.upsert(path, buffer.text);
+      completion.diskChanged([{ path, type: 2 }]);
       buffer.version++;
       if (active === path) showBuffer();
     }));
@@ -284,6 +299,12 @@ export function mountWorkspace(root: HTMLElement, onSaved: () => void): Workspac
     const request = ++treeRequest;
     const next: TreeEntry[] = await (await check(await fetch('/api/files'))).json();
     if (request !== treeRequest) return;
+    const previousSources = new Set(entries.filter(entry => entry.kind === 'source').map(entry => entry.path));
+    const nextSources = new Set(next.filter(entry => entry.kind === 'source').map(entry => entry.path));
+    completion.diskChanged([
+      ...[...previousSources].filter(path => !nextSources.has(path)).map(path => ({ path, type: 3 as const })),
+      ...[...nextSources].filter(path => !previousSources.has(path)).map(path => ({ path, type: 1 as const })),
+    ]);
     entries = next;
     renderTree();
   }
@@ -332,14 +353,20 @@ export function mountWorkspace(root: HTMLElement, onSaved: () => void): Workspac
         for (const [path, buffer] of [...buffers]) {
           if (!contains(from, path)) continue;
           buffers.delete(path);
-          buffers.set(to + path.slice(from.length), buffer);
+          completion.close(path);
+          const destination = to + path.slice(from.length);
+          buffers.set(destination, buffer);
+          completion.upsert(destination, buffer.text);
         }
         for (const path of [...expanded]) {
           if (!contains(from, path)) continue;
           expanded.delete(path);
           expanded.add(to + path.slice(from.length));
         }
-        if (active && contains(from, active)) active = to + active.slice(from.length);
+        if (active && contains(from, active)) {
+          active = to + active.slice(from.length);
+          editor.dispatch({ effects: completionConfig.reconfigure(completion.extensionFor(active)) });
+        }
         updateHeader();
         await refreshTree();
       } finally {
@@ -354,7 +381,11 @@ export function mountWorkspace(root: HTMLElement, onSaved: () => void): Workspac
       await check(await send(fileUrl(path), 'DELETE'));
       diskGeneration++;
       openRequest++;
-      for (const key of buffers.keys()) if (contains(path, key)) buffers.delete(key);
+      for (const key of buffers.keys()) {
+        if (!contains(path, key)) continue;
+        buffers.delete(key);
+        completion.close(key);
+      }
       for (const key of expanded) if (contains(path, key)) expanded.delete(key);
       if (active && contains(path, active)) {
         active = undefined;
@@ -435,6 +466,8 @@ export function mountWorkspace(root: HTMLElement, onSaved: () => void): Workspac
       void saveActive();
     }
   });
+  window.addEventListener('pagehide', () => completion.dispose());
+  window.addEventListener('pageshow', () => { if (root.isConnected) completion.resume(); });
   window.addEventListener('focus', () => { if (root.isConnected) void refresh(); });
   window.addEventListener('beforeunload', (event) => {
     if (root.isConnected && hasUnsavedEdits()) {

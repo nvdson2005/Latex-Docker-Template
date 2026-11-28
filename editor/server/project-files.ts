@@ -7,6 +7,7 @@ import type { TreeEntry, TextFile } from '../shared/contracts.js';
 type CreatableKind = 'source' | 'directory';
 
 export interface ProjectFiles {
+  validateSource(path: string, allowMissing?: boolean): Promise<void>;
   list(): Promise<TreeEntry[]>;
   read(path: string): Promise<TextFile>;
   create(path: string, kind: CreatableKind): Promise<TreeEntry>;
@@ -107,7 +108,7 @@ export function createProjectFiles(projectRoot: string): ProjectFiles {
     return result;
   }
 
-  async function inspect(path: string, allowMissing = false) {
+  async function inspect(path: string, allowMissing = false, allowMissingParent = false) {
     const segments = pathSegments(path);
     let absolute = root;
     let info: Stats | undefined;
@@ -116,7 +117,7 @@ export function createProjectFiles(projectRoot: string): ProjectFiles {
       info = await fileInfo(absolute);
       const last = index === segments.length - 1;
       if (!info) {
-        if (last && allowMissing) break;
+        if ((last && allowMissing) || allowMissingParent) break;
         throw new FileError(404, 'Project entry does not exist');
       }
       assertOrdinaryEntry(info);
@@ -167,6 +168,11 @@ export function createProjectFiles(projectRoot: string): ProjectFiles {
   }
 
   return {
+    async validateSource(path, allowMissing = false) {
+      await pending;
+      const { info } = await inspect(path, allowMissing, allowMissing);
+      if (!isSource(path) || (info && !info.isFile())) throw new FileError(400, 'Expected an editable source file');
+    },
     async list() {
       await pending;
       const entries: TreeEntry[] = [];

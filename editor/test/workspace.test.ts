@@ -56,6 +56,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  window.dispatchEvent(new Event('pagehide'));
   view()?.destroy();
   root.remove();
   vi.restoreAllMocks();
@@ -183,4 +184,71 @@ it('protects an unsaved destination draft after its disk entry disappears', asyn
   expect(fetchMock.mock.calls.some(([url]) => url === '/api/files/move')).toBe(false);
   await workspace.open('main.tex');
   expect(view().state.doc.toString()).toBe('Destination draft');
+});
+
+it('completes from a switched-away draft and replays both buffers on reconnect', async () => {
+  const sockets: FakeSocket[] = [];
+  class FakeSocket extends EventTarget {
+    static OPEN = 1;
+    readyState = 1;
+    sent: { id?: number; method: string; params: Record<string, unknown> }[] = [];
+    constructor() {
+      super();
+      sockets.push(this);
+      queueMicrotask(() => this.receive({ rootUri: 'file:///data' }));
+    }
+    receive(message: object) {
+      this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(message) }));
+    }
+    send(raw: string) {
+      const message = JSON.parse(raw);
+      this.sent.push(message);
+      if (message.method === 'initialize') this.receive({
+        jsonrpc: '2.0', id: message.id,
+        result: { capabilities: { textDocumentSync: 2, completionProvider: {} } },
+      });
+      if (message.method === 'textDocument/completion') this.receive({
+        jsonrpc: '2.0', id: message.id, result: [{
+          label: 'sec:draft',
+          textEdit: { newText: 'sec:draft', range: {
+            start: { line: 0, character: 5 }, end: { line: 0, character: 8 },
+          } },
+        }],
+      });
+    }
+    close() {
+      this.readyState = 3;
+      this.dispatchEvent(new Event('close'));
+    }
+  }
+  vi.stubGlobal('WebSocket', FakeSocket);
+  const workspace = mountWorkspace(root, vi.fn());
+  await workspace.open('sections/intro.tex');
+  await vi.waitFor(() => expect(sockets[0].sent.some(message => message.method === 'textDocument/didOpen')).toBe(true));
+  write('\\label{sec:draft}');
+  await workspace.open('main.tex');
+  view().dispatch({ changes: { from: 0, to: 4, insert: '\\ref{sec' }, selection: { anchor: 8 } });
+  vi.spyOn(EditorView.prototype, 'coordsAtPos').mockReturnValue(new DOMRect());
+  view().focus();
+  const { startCompletion } = await import('@codemirror/autocomplete');
+  startCompletion(view());
+  await vi.waitFor(() => expect(root.querySelector('[role=option]')?.textContent).toContain('sec:draft'));
+  const first = sockets[0].sent;
+  expect(first.slice(0, first.findIndex(message => message.method === 'textDocument/completion'))).toContainEqual(
+    expect.objectContaining({ method: 'textDocument/didChange', params: expect.objectContaining({
+      textDocument: expect.objectContaining({ uri: 'file:///data/sections/intro.tex' }),
+      contentChanges: [{ text: '\\label{sec:draft}' }],
+    }) }),
+  );
+  expect(first.some(message => message.method === 'textDocument/didClose')).toBe(false);
+
+  window.dispatchEvent(new Event('pagehide'));
+  window.dispatchEvent(new Event('pageshow'));
+  await vi.waitFor(() => expect(sockets[1].sent.filter(message => message.method === 'textDocument/didOpen')).toHaveLength(2));
+  expect(sockets[1].sent.filter(message => message.method === 'textDocument/didOpen').map(message => message.params.textDocument))
+    .toEqual([
+      expect.objectContaining({ uri: 'file:///data/sections/intro.tex', text: '\\label{sec:draft}' }),
+      expect.objectContaining({ uri: 'file:///data/main.tex', text: '\\ref{sec' }),
+    ]);
+  window.dispatchEvent(new Event('pagehide'));
 });
